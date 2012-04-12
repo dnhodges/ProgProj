@@ -1,0 +1,317 @@
+options{
+    LOOKAHEAD=3;
+    STATIC=false;
+    FORCE_LA_CHECK=true;
+    IGNORE_CASE=true;
+}
+
+PARSER_BEGIN(SQLParser)
+
+import java.util.Vector;
+import java.io.StringReader;
+
+public class SQLParser {
+    public static void main(String args[]) throws ParseException {
+        ParsedStatement ps;
+        ps = Parse("CREATE TABLE S (i integer PRIMARY KEY, j integer);");
+        ps.print();
+
+        if( (ps = Parse("SELECT a, b FROM S;")) != null) {
+            ps.print();
+        } else {
+            System.out.println("Parse Error");
+        }
+
+        ps = Parse("SELECT DISTINCT a, b FROM S ORDER BY S.a;");
+        ps.print();
+
+        ps = Parse("INSERT INTO S VALUES(1, 2);");
+        ps.print();
+    }
+
+    public static ParsedStatement Parse(String s) {
+        try {
+            ParsedStatement ps = new ParsedStatement();
+            SQLParser cvp = new SQLParser(new StringReader(s));
+            cvp.Input(ps); 
+            return ps;
+        } catch (TokenMgrError e) {
+            System.out.println(e);
+            e.printStackTrace();
+            return null;
+        } catch (Exception e) {
+            System.out.println("ParseException... try again");
+            e.printStackTrace();
+            return null;
+        }
+    }
+}
+
+PARSER_END(SQLParser)
+
+SKIP :
+{ 
+      " " 
+     | "\t"
+     | "\n"
+     | "\r"
+}
+
+TOKEN :
+{ 
+      <CREATE: "CREATE">
+          |
+      <TABLE: "TABLE">
+          |
+      <INSERT: "INSERT">
+          |
+      <INTO: "INTO">
+          |
+      <VALUES: "VALUES">
+          |
+      <DROP: "DROP">
+          |
+      <WHERE: "WHERE">
+          |
+      <FROM: "FROM">
+          |
+      <SELECT: "SELECT">
+          |
+      <DISTINCT: "DISTINCT">
+          |
+      <ORDER: "ORDER">
+          |
+      <BY: "BY">
+          |
+      <PRIMARY: "PRIMARY">
+          |
+      <KEY: "KEY">
+          |
+      <AND: "AND">
+          |
+      <DOT: ".">
+          |
+      < ID: ["a"-"z","A"-"Z","_"] ( ["a"-"z","A"-"Z","_","0"-"9"] )* >
+          |
+      < TEXT: "'" ["a"-"z","A"-"Z","_"] ( ["a"-"z","A"-"Z","_","0"-"9"," "] )* "'" >
+          |
+      < NUM: ( ["0"-"9","."] )+ >
+}
+
+
+void Input(ParsedStatement ps) :
+{
+}
+{
+    CreateTableStatement(ps) <EOF>
+        |
+    InsertValuesStatement(ps) <EOF>
+        |
+    QueryStatement(ps) <EOF>
+        |
+    DropTableStatement(ps) <EOF>
+}
+
+void DropTableStatement(ParsedStatement ps) :
+{
+    Token t;
+}
+{
+  <DROP> <TABLE> t=<ID>  ";"
+  { 
+      ps.initDropTable(t.image);
+  }
+}
+
+
+void CreateTableStatement(ParsedStatement ps) :
+{
+    Token t;
+}
+{
+  <CREATE> <TABLE> t=<ID> "(" TableAttribute(ps, true) <PRIMARY> <KEY> ( "," TableAttribute(ps, false) )* ")" ";"
+  { 
+      ps.initCreateTable(t.image);
+  }
+}
+
+void TableAttribute(ParsedStatement ps, boolean isprimarykey) :
+{
+    Token t1, t2;
+}
+{
+    t1=<ID> t2=<ID>
+    {
+        ps.addTableAttribute(t1.image, t2.image, isprimarykey);
+    }
+}
+
+void InsertValuesStatement(ParsedStatement ps) :
+{
+    Token t;
+}
+{
+  <INSERT> <INTO> t=<ID> <VALUES> "(" AttributeValue(ps) ( "," AttributeValue(ps) )* ")" ";"
+  { 
+      ps.initInsertValues(t.image);
+  }
+}
+
+void AttributeValue(ParsedStatement ps) :
+{
+    Token t;
+}
+{
+    t=<TEXT> 
+    {
+        ps.addStringAttributeValue(t.image);
+    }
+    |
+    t=<NUM>
+    {
+        ps.addNumberAttributeValue(t.image);
+    }
+}
+
+void QueryStatement(ParsedStatement ps) :
+{
+}
+{
+  <SELECT> SelectClause(ps) FromList(ps) WhereOrderByClause(ps) 
+  { 
+      ps.initQuery();
+  }
+  |
+  <SELECT> <DISTINCT> SelectClause(ps) FromList(ps) WhereOrderByClause(ps)
+  { 
+      ps.initQueryDistinct();
+  }
+}
+
+void WhereOrderByClause(ParsedStatement ps) :
+{
+}
+{
+    ";" 
+        |
+    <WHERE> Predicate(ps) ( <AND> Predicate(ps) )* OrderByClause(ps)
+        |
+    OrderByClause(ps)
+}
+
+
+void SelectClause(ParsedStatement ps) :
+{
+}
+{
+    SelectTupleAttribute(ps) ("," SelectTupleAttribute(ps) )*
+        |
+    "*"
+}
+
+void FromList(ParsedStatement ps) :
+{
+}
+{
+  <FROM> TableName(ps) ("," TableName(ps) )* 
+}
+
+void OrderByClause(ParsedStatement ps) :
+{
+}
+{
+    ";"
+        |
+    <ORDER> <BY> OrderByTupleAttribute(ps) ("," OrderByTupleAttribute(ps) )* ";"
+}
+
+void TableName(ParsedStatement ps) :
+{
+    Token t;
+}
+{
+    t=<ID> 
+    {
+        ps.addQueryTable(t.image);
+    }
+}
+
+void Predicate(ParsedStatement ps) :
+{
+    Token t1, t2, t3, t4;
+    Predicate pr = new Predicate();
+}
+{
+    TupleAttribute(ps, pr)  "=" RHS(ps, pr)
+    {
+        ps.addPredicate(pr);
+    }
+}
+
+void RHS(ParsedStatement ps, Predicate pr) :
+{
+    Token t1, t2;
+}
+{
+    TupleAttribute(ps, pr)
+    |
+    t1=<TEXT>
+    {
+        pr.addVariable(new Constant(t1.image));
+    }
+    |
+    t1=<NUM>
+    {
+        pr.addVariable(new Constant(new Integer(t1.image)));
+    }
+}
+
+void TupleAttribute(ParsedStatement ps, Predicate pr) :
+{
+    Token t1, t2;
+}
+{
+    t1=<ID> <DOT> t2=<ID> 
+    {
+        pr.addVariable(new TupleAttribute(t1.image, t2.image));
+    }
+    |
+    t2=<ID> 
+    {
+        pr.addVariable(new TupleAttribute(null, t2.image));
+    }
+}
+
+void SelectTupleAttribute(ParsedStatement ps) :
+{
+    Token t1, t2;
+}
+{
+    LOOKAHEAD(4)
+    t1=<ID> <DOT> t2=<ID> 
+    {
+        ps.addSelectVariable(new TupleAttribute(t1.image, t2.image));
+    }
+    |
+    t2=<ID> 
+    {
+        ps.addSelectVariable(new TupleAttribute(null, t2.image));
+    }
+}
+
+void OrderByTupleAttribute(ParsedStatement ps) :
+{
+    Token t1, t2;
+}
+{
+    LOOKAHEAD(4)
+    t1=<ID> <DOT> t2=<ID> 
+    {
+        ps.addOrderByAttribute(new TupleAttribute(t1.image, t2.image));
+    }
+    |
+    t2=<ID> 
+    {
+        ps.addOrderByAttribute(new TupleAttribute(null, t2.image));
+    }
+}
